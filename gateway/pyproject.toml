@@ -1,0 +1,49 @@
+[project]
+name = "gpsgw"
+version = "0.1.0"
+description = "GPS device gateway: protocol decoders, normalization and ingest listeners"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.7,<3", "asyncpg>=0.29", "redis>=5.0", "prometheus-client>=0.20"]
+
+[project.optional-dependencies]
+server = ["uvloop>=0.19; sys_platform != 'win32'"]
+test = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6.100", "pytest-cov>=5"]
+
+[project.entry-points."gps_platform.protocols"]
+# Protocol plugins register here (spec A6). Third-party packages declare the same group in their own metadata.
+gt06 = "gpsgw.protocols.gt06.decoder:Gt06Decoder"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["gpsgw*"]
+
+[tool.setuptools.package-data]
+"gpsgw.normalization.profiles" = ["*.json"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC"]
+ignore = ["S101", "S104"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/fixtures/*" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["gpsgw"]
+
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*"]  # asyncpg ships no type information
+ignore_missing_imports = true

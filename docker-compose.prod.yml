@@ -1,0 +1,72 @@
+# Production overrides. Requires a real domain and TLS certificates (see docs/PRODUCTION_DEPLOYMENT.md).
+# Hardening (spec A14/A15): no new privileges, read-only root filesystems where the service writes only to volumes
+# or tmpfs, resource limits, restart policies (base file) and rotated logs. No internal port is published.
+x-hardened: &hardened
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  backend:
+    <<: *hardened
+    read_only: true
+    tmpfs: ["/tmp"]
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      DEBUG: "0"
+      REFRESH_COOKIE_SECURE: "1"
+    deploy:
+      resources: { limits: { cpus: "2", memory: 1g } }
+    logging: &logging
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+  celery-worker:
+    <<: *hardened
+    read_only: true
+    tmpfs: ["/tmp"]
+    environment: { DJANGO_SETTINGS_MODULE: config.settings.prod }
+    deploy:
+      resources: { limits: { cpus: "1", memory: 768m } }
+    logging: *logging
+  celery-beat:
+    <<: *hardened
+    read_only: true
+    tmpfs: ["/tmp"]
+    environment: { DJANGO_SETTINGS_MODULE: config.settings.prod }
+    logging: *logging
+  gateway:
+    <<: *hardened
+    read_only: true
+    tmpfs: ["/tmp"]
+    environment:
+      GATEWAY_STORAGE: postgres
+      GATEWAY_ALLOW_MEMORY_STORAGE: "0"
+    deploy:
+      resources: { limits: { cpus: "2", memory: 1g } }
+    logging: *logging
+  processor:
+    <<: *hardened
+    read_only: true
+    tmpfs: ["/tmp"]
+    deploy:
+      resources: { limits: { cpus: "1", memory: 768m } }
+    logging: *logging
+  frontend:
+    <<: *hardened
+    logging: *logging
+  postgres:
+    deploy:
+      resources: { limits: { memory: 4g } }
+    logging: *logging
+  redis:
+    logging: *logging
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/prod:/etc/nginx/conf.d:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - static:/srv/static:ro
+      - media:/srv/media:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    logging: *logging

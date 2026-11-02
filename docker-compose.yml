@@ -1,0 +1,273 @@
+# Base stack. Development: docker compose up --build
+# Production: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+name: gps-platform
+
+x-backend-env: &backend-env
+  DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.dev}
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set DJANGO_SECRET_KEY in .env}
+  DEBUG: ${DEBUG:-0}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+  CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost}
+  DATABASE_ENGINE: ${DATABASE_ENGINE:-django.db.backends.postgresql}
+  DATABASE_NAME: ${DATABASE_NAME:-gps}
+  DATABASE_USER: ${DATABASE_USER:-gps}
+  DATABASE_PASSWORD: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD in .env}
+  DATABASE_HOST: postgres
+  DATABASE_PORT: "5432"
+  REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
+  DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Africa/Dar_es_Salaam}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+  REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-1}
+  EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
+  EMAIL_HOST: ${EMAIL_HOST:-}
+  EMAIL_PORT: ${EMAIL_PORT:-587}
+  EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+  EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+  DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-Fleet Tracking <no-reply@localhost>}
+  SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD:-}
+  THROTTLE_LOGIN: ${THROTTLE_LOGIN:-10/min}
+  THROTTLE_REFRESH: ${THROTTLE_REFRESH:-30/min}
+  # No default here: Compose ends ${VAR-default} at the first "}", and tile URLs contain {z}/{x}/{y}.
+  # .env.example provides the value; if it is missing the map shows a plain background.
+  MAP_TILE_URL: "${MAP_TILE_URL:-}"
+  MAP_TILE_ATTRIBUTION: "${MAP_TILE_ATTRIBUTION:-© OpenStreetMap contributors}"
+  MAP_DEFAULT_CENTER: ${MAP_DEFAULT_CENTER:--6.7924,39.2083}
+  MAP_DEFAULT_ZOOM: ${MAP_DEFAULT_ZOOM:-12}
+  WS_TRACKING_FLUSH: ${WS_TRACKING_FLUSH:-1.0}
+  COMMAND_EXPIRY_HOURS: ${COMMAND_EXPIRY_HOURS:-24}
+  GATEWAY_HEALTH_URL: ${GATEWAY_HEALTH_URL:-http://gateway:8081/health}
+  PROCESSOR_HEALTH_URL: ${PROCESSOR_HEALTH_URL:-http://processor:8082/health}
+  HISTORY_MAX_DAYS: ${HISTORY_MAX_DAYS:-31}
+  TRACKER_SERVER_HOST: ${TRACKER_SERVER_HOST:-gps.example.com}
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+  GATEWAY_INTERNAL_URL: ${GATEWAY_INTERNAL_URL:-http://gateway:8081}
+  WEBHOOK_TIMEOUT: ${WEBHOOK_TIMEOUT:-10}
+  WEBHOOK_ALLOW_HTTP: ${WEBHOOK_ALLOW_HTTP:-0}
+  WEBHOOK_ALLOW_PRIVATE: ${WEBHOOK_ALLOW_PRIVATE:-0}
+
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME:-gps}
+      POSTGRES_USER: ${DATABASE_USER:-gps}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD in .env}
+    volumes:
+      - pgdata:/home/postgres/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks: [internal]
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    restart: unless-stopped
+    networks: [internal]
+
+  backend:
+    build: ./backend
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "1"
+      # Web requests run as this restricted role so PostgreSQL Row-Level Security applies.
+      DB_RUNTIME_ROLE: gps_app
+    volumes:
+      - static:/app/staticfiles
+      - media:/app/media
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [internal]
+
+  celery-worker:
+    build: ./backend
+    command: ["celery", "-A", "config", "worker", "--loglevel=INFO", "--concurrency=2"]
+    environment: *backend-env
+    # Report exports are written (and purged) by the worker and downloaded through the backend: both need the
+    # same media volume.
+    volumes:
+      - media:/app/media
+    depends_on:
+      backend: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME --timeout 5 | grep -q pong"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks: [internal]
+
+  celery-beat:
+    build: ./backend
+    command: ["celery", "-A", "config", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
+    environment: *backend-env
+    depends_on:
+      backend: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/celerybeat-schedule"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks: [internal]
+
+  gateway:
+    build: ./gateway
+    environment:
+      TELTONIKA_TCP_PORT: "5027"
+      TELTONIKA_UDP_PORT: "5027"
+      GATEWAY_HEALTH_PORT: "8081"
+      GATEWAY_STORAGE: ${GATEWAY_STORAGE:-postgres}
+      GATEWAY_ALLOW_MEMORY_STORAGE: ${GATEWAY_ALLOW_MEMORY_STORAGE:-0}
+      GATEWAY_DEV_DEVICES: ${GATEWAY_DEV_DEVICES:-}
+      GATEWAY_RECONCILE_SECONDS: "10"
+      MANUAL_INGEST_TOKEN: ${DJANGO_SECRET_KEY:?set DJANGO_SECRET_KEY in .env}
+      DATABASE_NAME: ${DATABASE_NAME:-gps}
+      DATABASE_USER: ${DATABASE_USER:-gps}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD in .env}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    # Published so trackers can reach them. 5100-5109 is the reserved range for listener ports assigned in the UI
+    # (spec A7): Docker cannot add ports at runtime, so they are published up front. Keep LISTENER_PUBLISHED_PORTS
+    # and LISTENER_RESERVED_RANGE (backend) in step with this list, and open the same ports in the firewall.
+    ports:
+      - "${TELTONIKA_PUBLIC_PORT:-5027}:5027/tcp"
+      - "${TELTONIKA_PUBLIC_PORT:-5027}:5027/udp"
+      - "5023:5023/tcp"
+      - "5055:5055/tcp"
+      - "5100-5109:5100-5109/tcp"
+      - "5100-5109:5100-5109/udp"
+    # Starts after the backend is healthy, i.e. after migrations have created the tables it writes to.
+    depends_on:
+      backend: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [internal]
+
+  processor:
+    build: ./processor
+    environment:
+      DATABASE_NAME: ${DATABASE_NAME:-gps}
+      DATABASE_USER: ${DATABASE_USER:-gps}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD in .env}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      MOVING_SPEED_KMH: ${MOVING_SPEED_KMH:-5}
+      OFFLINE_MINUTES: ${OFFLINE_MINUTES:-5}
+      NO_GPS_MINUTES: ${NO_GPS_MINUTES:-10}
+      SWEEP_SECONDS: ${SWEEP_SECONDS:-15}
+      STOP_SPEED_KMH: ${STOP_SPEED_KMH:-3}
+      OVERSPEED_WARNING_KMH: ${OVERSPEED_WARNING_KMH:-80}
+      OVERSPEED_CRITICAL_KMH: ${OVERSPEED_CRITICAL_KMH:-100}
+      RECOMPUTE_DEBOUNCE_SECONDS: ${RECOMPUTE_DEBOUNCE_SECONDS:-30}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    # Starts after the backend is healthy, i.e. after migrations created device_state and processing_checkpoints.
+    depends_on:
+      backend: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [internal]
+
+  # Simulated trackers (development and demos only):
+  #   docker compose --profile sim run --rm simulator --scenario overspeed --speedup 5
+  simulator:
+    build:
+      context: .
+      dockerfile: simulator/Dockerfile
+    profiles: [sim]
+    depends_on:
+      gateway: { condition: service_healthy }
+    networks: [internal]
+
+  # Monitoring (spec A15): docker compose --profile monitoring up -d. Grafana listens on 127.0.0.1 only; reach it
+  # through an SSH tunnel (docs/MONITORING.md). Prometheus is internal.
+  prometheus:
+    image: prom/prometheus:v3.6.0
+    profiles: [monitoring]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=30d"]
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - promdata:/prometheus
+    restart: unless-stopped
+    networks: [internal]
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    profiles: [monitoring]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}   # empty: Grafana asks for a new password at first sign-in
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    depends_on: [prometheus]
+    restart: unless-stopped
+    networks: [internal]
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    networks: [internal]
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - static:/srv/static:ro
+      - media:/srv/media:ro
+    depends_on:
+      backend: { condition: service_healthy }
+      frontend: { condition: service_started }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health | grep -q ok"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks: [internal]
+
+volumes:
+  pgdata:
+  redisdata:
+  static:
+  media:
+  promdata:
+  grafanadata:
+
+networks:
+  internal:

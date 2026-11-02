@@ -1,0 +1,18 @@
+# Versions installed and tested together on 2026-10-01 (see docs/DECISIONS.md).
+Django==5.2.17
+djangorestframework==3.18.1
+# Celery without the [redis] extra: that extra pins redis-py below 8 (resolver conflict); kombu 5.6 works with redis 8.1.
+celery==5.6.3
+redis==8.1.0
+channels==4.3.2
+channels-redis==4.3.0
+psycopg[binary]==3.3.6
+uvicorn[standard]==0.54.0
+argon2-cffi==25.1.0
+structlog==26.1.0
+PyJWT==2.15.0
+drf-spectacular==0.28.0
+openpyxl==3.1.5
+reportlab==4.4.10
+prometheus-client==0.26.0
+sentry-sdk==2.40.0

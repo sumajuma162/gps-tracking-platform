@@ -1,0 +1,47 @@
+# Alerting rules (spec A15 "monitoring and alerting"). Route them with Alertmanager or Grafana alerting.
+groups:
+  - name: gps-platform
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations: { summary: "{{ $labels.job }} is not answering /metrics" }
+      - alert: PositionsNotStored
+        expr: increase(gpsgw_persist_failures_total[5m]) > 0
+        labels: { severity: critical }
+        annotations: { summary: "The gateway couldn't store positions (trackers get no ACK and will resend)" }
+      - alert: NoIngestion
+        expr: sum(gpsgw_connections) > 0 and sum(rate(gpsgw_records_total{outcome="stored"}[10m])) == 0
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Trackers are connected but no records were stored for 10 minutes" }
+      - alert: HighIngestLag
+        expr: histogram_quantile(0.95, sum by (le) (rate(gpsgw_ingest_lag_seconds_bucket[5m]))) > 120
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "p95 device-to-server lag above 2 minutes (backlog uploads or clock problems)" }
+      - alert: ProcessorFallingBehind
+        expr: gpsproc_last_lag_ms > 5000
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "Live updates are more than 5 s behind the gateway" }
+      - alert: ProcessorErrors
+        expr: increase(gpsproc_errors_total[10m]) > 5
+        labels: { severity: warning }
+        annotations: { summary: "The processor is failing batches" }
+      - alert: QueueBacklog
+        expr: gps_queue_items{queue=~"notifications|webhook_deliveries|celery"} > 500
+        for: 15m
+        labels: { severity: warning }
+        annotations: { summary: "{{ $labels.queue }} has {{ $value }} items waiting" }
+      - alert: ApiErrors
+        expr: sum(rate(gps_http_requests_total{status=~"5.."}[5m])) / sum(rate(gps_http_requests_total[5m])) > 0.02
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "More than 2% of API requests fail with a server error" }
+      - alert: ManyProtocolErrors
+        expr: sum by (protocol) (rate(gpsgw_protocol_errors_total[10m])) > 1
+        for: 10m
+        labels: { severity: info }
+        annotations: { summary: "{{ $labels.protocol }}: frequent malformed input (misconfigured trackers or scanning)" }

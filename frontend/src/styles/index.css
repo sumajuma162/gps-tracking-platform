@@ -1,0 +1,40 @@
+@import "tailwindcss";
+@import "@fontsource/barlow/400.css";
+@import "@fontsource/barlow/500.css";
+@import "@fontsource/barlow/600.css";
+@import "@fontsource/barlow-semi-condensed/600.css";
+@import "@fontsource/barlow-semi-condensed/700.css";
+
+@theme {
+  --font-sans: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Barlow Semi Condensed", "Barlow", "Segoe UI", sans-serif;
+  --color-ink: #17323a;
+  --color-ink-soft: #4b6168;
+  --color-ink-deep: #0f252b;
+  --color-paper: #eef1f0;
+  --color-panel: #ffffff;
+  --color-line: #d3dad8;
+  --color-marking: #e8a317;
+  --color-marking-soft: #fbefd3;
+  --color-moving: #2e7d4f;
+  --color-idle: #b7791f;
+  --color-offline: #7d878b;
+  --color-critical: #b3261e;
+}
+
+@layer base {
+  html { color: var(--color-ink); background: var(--color-paper); font-family: var(--font-sans); }
+  h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.005em; }
+  :focus-visible { outline: 3px solid var(--color-marking); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+}
+
+/* Leaflet: our fonts, and a calm background when no tile source is configured. */
+.leaflet-container { font-family: var(--font-sans); }
+.map-no-tiles { background: repeating-linear-gradient(0deg, #eef1f0 0 39px, #dfe5e3 39px 40px),
+  repeating-linear-gradient(90deg, #eef1f0 0 39px, #dfe5e3 39px 40px); background-blend-mode: multiply; }
+.fleet-marker { background: transparent; border: 0; }
+.marker-cluster div { font-family: var(--font-sans); font-weight: 600; }
+.route-arrow { background: transparent; border: 0; }

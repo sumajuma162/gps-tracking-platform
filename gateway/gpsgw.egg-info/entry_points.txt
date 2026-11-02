@@ -1,0 +1,2 @@
+[gps_platform.protocols]
+gt06 = gpsgw.protocols.gt06.decoder:Gt06Decoder

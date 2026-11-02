@@ -1,0 +1,26 @@
+{
+  "name": "teltonika_fmc920",
+  "version": 1,
+  "verified": false,
+  "_note": "IO IDs from Teltonika FMB/FMC documentation. Verify against the official FMC920 AVL ID list for the firmware in use, then set verified=true.",
+  "mappings": [
+    {"io_id": 239, "kind": "field", "target": "ignition"},
+    {"io_id": 240, "kind": "field", "target": "motion"},
+    {"io_id": 21,  "kind": "field", "target": "gsm_signal"},
+    {"io_id": 66,  "kind": "field", "target": "external_voltage", "scale": 0.001, "unit": "V"},
+    {"io_id": 67,  "kind": "field", "target": "battery_voltage", "scale": 0.001, "unit": "V"},
+    {"io_id": 113, "kind": "field", "target": "battery_level", "unit": "%"},
+    {"io_id": 16,  "kind": "field", "target": "odometer_km", "scale": 0.001, "unit": "km"},
+    {"io_id": 182, "kind": "field", "target": "hdop", "scale": 0.1},
+    {"io_id": 181, "kind": "sensor", "target": "pdop", "scale": 0.1},
+    {"io_id": 69,  "kind": "sensor", "target": "gnss_status"},
+    {"io_id": 200, "kind": "sensor", "target": "sleep_mode"},
+    {"io_id": 1,   "kind": "sensor", "target": "din1"},
+    {"io_id": 246, "kind": "event", "target": "towing", "event_map": {"1": "towing"}},
+    {"io_id": 247, "kind": "event", "target": "crash", "event_map": {"*": "crash"}},
+    {"io_id": 249, "kind": "event", "target": "jamming", "event_map": {"1": "gsm_jamming"}},
+    {"io_id": 252, "kind": "event", "target": "unplug", "event_map": {"1": "power_disconnected"}},
+    {"io_id": 253, "kind": "event", "target": "green_driving", "event_map": {"1": "harsh_acceleration", "2": "harsh_braking", "3": "harsh_cornering"}},
+    {"io_id": 255, "kind": "event", "target": "overspeed", "event_map": {"*": "device_overspeed"}}
+  ]
+}

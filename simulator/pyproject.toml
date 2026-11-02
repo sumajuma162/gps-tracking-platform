@@ -1,0 +1,29 @@
+[project]
+name = "gpssim"
+version = "0.1.0"
+description = "Simulated GPS trackers speaking the Teltonika protocol over TCP/UDP (development and demos)"
+requires-python = ">=3.12"
+dependencies = ["gpsgw"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["gpssim*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gpssim"]
+known-third-party = ["gpsgw"]

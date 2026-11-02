@@ -1,0 +1,17 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.coverage
+htmlcov/
+node_modules/
+dist/
+staticfiles/
+media/
+*.log
+.e2e-mail/
+monitoring/prometheus/metrics_token
+backups/

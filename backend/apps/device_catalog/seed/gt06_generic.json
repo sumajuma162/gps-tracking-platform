@@ -1,0 +1,12 @@
+{
+  "name": "gt06_generic",
+  "_note": "IO ids are the GT06 plugin's own (gateway/gpsgw/protocols/gt06/decoder.py). Alarm codes from the published GT06 protocol document; clones differ, so verify on your device.",
+  "mappings": [
+    {"io_id": 1, "kind": "field", "target": "ignition"},
+    {"io_id": 4, "kind": "field", "target": "gsm_signal"},
+    {"io_id": 3, "kind": "field", "target": "battery_level", "scale": 16.667, "unit": "%"},
+    {"io_id": 6, "kind": "field", "target": "odometer_km", "scale": 0.001, "unit": "km"},
+    {"io_id": 8, "kind": "sensor", "target": "charging"},
+    {"io_id": 5, "kind": "event", "target": "alarm", "event_map": {"1": "sos", "2": "power_disconnected", "3": "vibration", "6": "device_overspeed", "9": "towing"}}
+  ]
+}

@@ -1,0 +1,6 @@
+# Versions installed and tested together on 2026-10-01.
+pydantic==2.13.5
+asyncpg==0.31.0
+redis==8.1.0
+prometheus-client==0.26.0
+sentry-sdk==2.40.0

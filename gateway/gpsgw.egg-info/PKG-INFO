@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: gpsgw
+Version: 0.1.0
+Summary: GPS device gateway: protocol decoders, normalization and ingest listeners
+Requires-Python: >=3.12
+Requires-Dist: pydantic<3,>=2.7
+Requires-Dist: asyncpg>=0.29
+Requires-Dist: redis>=5.0
+Requires-Dist: prometheus-client>=0.20
+Provides-Extra: server
+Requires-Dist: uvloop>=0.19; sys_platform != "win32" and extra == "server"
+Provides-Extra: test
+Requires-Dist: pytest>=8; extra == "test"
+Requires-Dist: pytest-asyncio>=0.23; extra == "test"
+Requires-Dist: hypothesis>=6.100; extra == "test"
+Requires-Dist: pytest-cov>=5; extra == "test"

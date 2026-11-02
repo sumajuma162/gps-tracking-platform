@@ -1,0 +1,193 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gateway:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: gateway } }
+    services:
+      redis:   # stream publishing and change events (tests/test_redis_bus.py)
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+    env:
+      GATEWAY_TEST_REDIS_URL: redis://localhost:6379/14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip, cache-dependency-path: gateway/requirements-dev.txt }
+      - run: pip install -r requirements-dev.txt && pip install --no-deps -e .
+      - run: ruff check .
+      - run: mypy
+      # Unit tests only. The PostgreSQL/Redis adapters are exercised by the backend job's end-to-end test, which
+      # also enforces >= 90% combined gateway coverage.
+      - run: pytest --cov=gpsgw --cov-report=term --cov-fail-under=85
+
+  simulator:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r gateway/requirements-dev.txt && pip install --no-deps -e gateway -e simulator
+      - run: ruff check simulator
+      - run: cd simulator && pytest -q
+
+  processor:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: processor } }
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+    env:
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt pytest pytest-asyncio ruff
+      - run: ruff check .
+      - name: Tests (includes recovery after Redis loses the stream and consumer group)
+        run: pytest -q
+
+  backend:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: backend } }
+    services:
+      postgres:
+        image: timescale/timescaledb-ha:pg16
+        env: { POSTGRES_DB: gps, POSTGRES_USER: gps, POSTGRES_PASSWORD: ci-only-password }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U gps" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.test
+      DATABASE_HOST: localhost
+      DATABASE_PASSWORD: ci-only-password
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip, cache-dependency-path: backend/requirements-dev.txt }
+      - run: pip install -r requirements-dev.txt -r ../gateway/requirements.txt -r ../processor/requirements.txt && pip install --no-deps -e ../gateway
+      - run: ruff check .
+      - run: python manage.py check
+      - run: python manage.py makemigrations --check --dry-run
+      - name: Tests (gateway end-to-end, tracker-to-browser latency, analysis, alert workflow and command round trip)
+        env: { PYTHONPATH: "../gateway:../processor:../simulator" }   # simulator: the Codec 12 round-trip test
+        run: pytest -q --cov=apps --cov=common --cov-fail-under=90
+      - name: Gateway coverage (unit tests + end-to-end tests against the real database)
+        env: { PYTHONPATH: "../gateway:../processor:../simulator", COVERAGE_FILE: /tmp/gateway.coverage }
+        run: |
+          (cd ../gateway && pip install -r requirements-dev.txt && pytest -q --cov=gpsgw)
+          pytest -q apps/tracking/tests/test_gateway_ingest.py apps/devices/tests/test_phase10_protocols.py \
+            apps/tracking/tests/test_scenario4.py --cov=gpsgw --cov-append
+          coverage report --include="*/gpsgw/*" --fail-under=90
+      - name: Deployment checklist
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.prod
+          DJANGO_SECRET_KEY: ci-check-deploy-${{ github.run_id }}-0123456789abcdefghijklmnopqrstuvwxyz
+          ALLOWED_HOSTS: gps.example.com
+        run: python manage.py check --deploy --fail-level WARNING
+
+  frontend:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  # Spec A14: dependencies scanned with pip-audit and npm audit; images with Trivy (docker job).
+  security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pip-audit==2.9.0
+      - run: pip-audit -r backend/requirements.txt -r gateway/requirements.txt -r processor/requirements.txt
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      # Known moderate advisories (fixed only in new majors, assessed in docs/SECURITY.md) don't fail the build.
+      - run: cd frontend && npm audit --audit-level=high
+
+  monitoring-config:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: promtool check config and rules
+        run: |
+          touch monitoring/prometheus/metrics_token
+          docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" --entrypoint promtool \
+            prom/prometheus:v3.6.0 check config /etc/prometheus/prometheus.yml
+      - name: Grafana dashboard is valid JSON
+        run: python3 -m json.tool monitoring/grafana/dashboards/gps-platform.json > /dev/null
+
+  docker:
+    runs-on: ubuntu-24.04
+    needs: [gateway, backend, frontend, processor, simulator, security]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure environment (DEBUG on so seed_demo is allowed in CI)
+        run: |
+          cp .env.example .env
+          echo "THROTTLE_LOGIN=200/min" >> .env
+          echo "THROTTLE_REFRESH=1000/min" >> .env   # every page load restores the session; tests reload fast
+          echo "MAP_TILE_URL=" >> .env          # no public tile traffic from CI
+          echo "EMAIL_BACKEND=django.core.mail.backends.filebased.EmailBackend" >> .env   # invitations for Scenario 1
+          echo "EMAIL_FILE_PATH=/tmp/e2e-mail" >> .env
+      - run: docker compose config --quiet
+      - run: docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+      - run: docker compose --profile sim build
+      - name: Scan images (Trivy; fail on fixable HIGH/CRITICAL)
+        run: |
+          for svc in backend gateway processor frontend; do
+            name="$(basename "$PWD")-$svc"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.67.2 image \
+              --exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL --no-progress "$name"
+          done
+      - name: Start stack and wait for health
+        run: |
+          mkdir -p .e2e-mail && chmod 777 .e2e-mail      # invitation emails for Scenario 1, read by the tests
+          printf 'services:\n  backend:\n    volumes:\n      - ./.e2e-mail:/tmp/e2e-mail\n' > docker-compose.override.yml
+          docker compose up -d
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost/readiness; then echo; exit 0; fi
+            sleep 5
+          done
+          docker compose ps; docker compose logs --tail=80; exit 1
+      - name: Seed demo data
+        run: docker compose exec -T backend python manage.py seed_demo
+      - name: Browser acceptance tests (Phase 1)
+        run: |
+          pip install -r e2e/requirements.txt -r gateway/requirements.txt
+          python -m playwright install --with-deps chromium
+          E2E_BASE_URL=http://localhost E2E_PASSWORD=change-me-Demo-Pass-1 E2E_TRACKER_HOST=localhost E2E_MAIL_DIR=.e2e-mail pytest e2e -q
+      - name: Gateway stores Teltonika's official sample packet
+        run: |
+          python3 - <<'PY'
+          import socket
+          s = socket.create_connection(("localhost", 5027), 5)
+          s.sendall(bytes.fromhex("000F333536333037303432343431303133"))       # demo tracker T 123 ABC
+          assert s.recv(1) == b"\x01", "IMEI not accepted"
+          s.sendall(bytes.fromhex("000000000000003608010000016B40D8EA30010000000000000000000000000000000105021503010101425E0F01F10000601A014E0000000000000000010000C7CF"))
+          assert s.recv(4) == (1).to_bytes(4, "big"), "record not acknowledged"
+          print("ACK received")
+          PY
+          docker compose exec -T postgres psql -U gps -d gps -tAc "SELECT count(*) FROM positions" | grep -qx 1
+      - if: always()
+        run: docker compose down -v

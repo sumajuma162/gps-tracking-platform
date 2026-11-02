@@ -1,0 +1,22 @@
+# Point-in-time recovery with pgBackRest WAL archiving (spec A15). Add to the production command line:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.backup.yml up -d
+# then create the stanza once:  docker compose exec -u postgres postgres pgbackrest --stanza=gps stanza-create
+# NOT verified in the build environment; see docs/BACKUP_RESTORE.md (restore drill before go-live).
+services:
+  postgres:
+    command:
+      - postgres
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=gps archive-push %p
+      - -c
+      - archive_timeout=300
+      - -c
+      - wal_level=replica
+    environment:
+      PGBACKREST_REPO1_S3_KEY: ${PGBACKREST_REPO1_S3_KEY:?set PGBACKREST_REPO1_S3_KEY}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${PGBACKREST_REPO1_S3_KEY_SECRET:?set PGBACKREST_REPO1_S3_KEY_SECRET}
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_REPO1_CIPHER_PASS:?set PGBACKREST_REPO1_CIPHER_PASS}
+    volumes:
+      - ./docker/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
