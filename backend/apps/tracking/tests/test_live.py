@@ -107,6 +107,7 @@ def test_platform_manual_position_uses_gateway_and_returns_fix(org_a, api, super
     device = fleet[0][0][1]
     settings.GATEWAY_MANUAL_INGEST_URL = "http://gateway.test/manual-position"
     captured = {}
+    submitted_time = "2026-10-28T10:00:00+03:00"
 
     class GatewayResponse(BytesIO):
         def __enter__(self):
@@ -126,13 +127,14 @@ def test_platform_manual_position_uses_gateway_and_returns_fix(org_a, api, super
     monkeypatch.setattr("apps.tracking.manual.urllib.request.urlopen", fake_urlopen)
     response = api(superadmin).post("/api/v1/platform/manual-positions/", {
         "device_id": device.pk, "latitude": -6.81, "longitude": 39.27, "speed_kmh": 35, "heading": 90,
-        "ignition": True,
+        "ignition": True, "device_time": submitted_time,
     }, format="json")
 
     assert response.status_code == 200
     assert response.json()["latitude"] == -6.81 and response.json()["longitude"] == 39.27
     assert response.json()["accepted_records"] == 1
     assert captured["payload"]["identifier"] == device.identifier
+    assert captured["payload"]["device_time"] == "2026-10-28T07:00:00+00:00"
     assert captured["authorization"].startswith("Bearer ") and captured["timeout"] == 5
 
 

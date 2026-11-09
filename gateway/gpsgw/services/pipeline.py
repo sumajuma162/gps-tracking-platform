@@ -56,7 +56,7 @@ class IngestPipeline:
         out: list[NormalizedLocation] = []
         offset = timedelta(minutes=device.time_offset_minutes)
         for raw in raws:
-            if offset:
+            if offset and not raw.extra.get("manual_position"):
                 raw = replace(raw, device_time=raw.device_time - offset)
             try:
                 out.append(normalize(raw, identifier=device.identifier, protocol=device.protocol,

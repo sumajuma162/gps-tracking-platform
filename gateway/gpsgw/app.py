@@ -21,6 +21,20 @@ from gpsgw.services.pipeline import IngestPipeline
 log = logging.getLogger("gpsgw")
 
 
+def _manual_device_time(value: Any) -> datetime:
+    if value is None:
+        return datetime.now(UTC)
+    if not isinstance(value, str):
+        raise ValueError("device_time must be an ISO 8601 string")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("device_time must be an ISO 8601 string") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("device_time must include a timezone")
+    return parsed.astimezone(UTC)
+
+
 class StartupError(RuntimeError):
     pass
 
@@ -128,7 +142,7 @@ class Gateway:
                     io[mapping.io_id] = int(ignition)
                 elif mapping.kind == "field" and mapping.target == "motion":
                     io[mapping.io_id] = int(speed > 0)
-        device_time = datetime.now(UTC)
+        device_time = _manual_device_time(payload.get("device_time"))
         raw = RawRecord(device_time=device_time, latitude=latitude, longitude=longitude, speed_kmh=speed,
                         heading=heading, satellites=8, gps_valid=True, io=io,
                         extra={"manual_position": True,

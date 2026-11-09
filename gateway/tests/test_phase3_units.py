@@ -1,10 +1,12 @@
 """Annotator, clock offset, listener manager, registry cache and inbox throttling (no database)."""
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from gpsgw.app import _manual_device_time
 from gpsgw.listeners.manager import ListenerManager
 from gpsgw.normalization.io_mapper import normalize
 from gpsgw.protocols.base import RawRecord, default_registry
@@ -90,6 +92,27 @@ async def test_pipeline_applies_clock_offset_and_commits_only_on_success():
     (stored,) = persistence.rows.values()
     assert stored.device_time == T0 and not stored.is_late
     assert pipeline.stats.records_stored == 1 and pipeline.stats.persist_failures == 1
+
+
+def test_manual_device_time_uses_submitted_timestamp_as_utc():
+    assert _manual_device_time("2026-11-09T10:30:00+03:00") == datetime(2026, 11, 9, 7, 30, tzinfo=UTC)
+    with pytest.raises(ValueError, match="include a timezone"):
+        _manual_device_time("2026-11-09T10:30:00")
+
+
+def test_pipeline_does_not_apply_tracker_offset_to_manual_timestamp():
+    async def run() -> None:
+        persistence = MemoryPersistence()
+        pipeline = IngestPipeline(persistence, MemoryPublisher())
+        device = DeviceInfo(1, "x", "teltonika", 1, None, None, time_offset_minutes=180)
+        raw = RawRecord(device_time=T0, latitude=DAR[0], longitude=DAR[1], satellites=9,
+                        extra={"manual_position": True})
+
+        assert await pipeline.ingest(device, [raw]) == 1
+        (stored,) = persistence.rows.values()
+        assert stored.device_time == T0
+
+    asyncio.run(run())
 
 
 # --- listener manager -------------------------------------------------------------------------------------

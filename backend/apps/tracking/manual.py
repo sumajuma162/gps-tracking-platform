@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from datetime import UTC
 from typing import Any
 
 from django.conf import settings
@@ -29,6 +30,7 @@ class ManualPositionSerializer(serializers.Serializer):  # type: ignore[type-arg
     device_id = serializers.IntegerField(min_value=1)
     latitude = serializers.FloatField(min_value=-90, max_value=90)
     longitude = serializers.FloatField(min_value=-180, max_value=180)
+    device_time = serializers.DateTimeField(required=False, default_timezone=UTC)
     speed_kmh = serializers.FloatField(min_value=0, max_value=300, default=0)
     heading = serializers.FloatField(min_value=0, max_value=359.999, required=False, allow_null=True)
     ignition = serializers.BooleanField(default=True)
@@ -119,7 +121,8 @@ class ManualPositionView(APIView):
         payload = {"identifier": device.identifier, "protocol": device.device_model.protocol.name,
                    "latitude": values["latitude"], "longitude": values["longitude"],
                    "speed_kmh": values["speed_kmh"], "heading": values.get("heading"),
-                   "ignition": values["ignition"]}
+                   "ignition": values["ignition"],
+                   "device_time": values["device_time"].isoformat() if values.get("device_time") else None}
         gateway_request = urllib.request.Request(  # noqa: S310 - configured internal gateway URL
             settings.GATEWAY_MANUAL_INGEST_URL, data=json.dumps(payload).encode(),
             headers={"Authorization": f"Bearer {settings.SECRET_KEY}", "Content-Type": "application/json"},
