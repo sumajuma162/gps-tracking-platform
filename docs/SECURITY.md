@@ -61,11 +61,12 @@ fields. Sentry is configured not to send personal data.
 CI runs `pip-audit` on every Python requirements file and `npm audit --audit-level=high`, and scans the built
 images with Trivy (fails on fixable HIGH/CRITICAL).
 
-Known and accepted (2026-10-04): 4 moderate npm advisories, fixed only in new major versions —
-React Router 6 (open redirect via backslash in `<Link>`/`useNavigate`, and an SSR hydration issue) and Vitest 4
-(dev-server file read). The app doesn't use server-side rendering; Vitest isn't shipped; user-supplied redirect
-targets go through `safeNext`, which rejects backslashes, whitespace, control characters, schemes and `//`.
-Plan: upgrade to React Router 7 and Vitest 5 in the next maintenance window.
+Known and accepted (2026-11-10): `npm audit --audit-level=high` passes; 9 moderate advisory instances remain in
+React Router 6 and the nested `minimatch` dependency used by TypeScript ESLint. The app doesn't use server-side
+rendering; user-supplied redirect targets go through `safeNext`, which rejects backslashes, whitespace, control
+characters, schemes and `//`. Vitest was upgraded to 5.1.0; Vite and `follow-redirects` were updated to patched
+releases. Plan: upgrade to React Router 7 and resolve the remaining transitive `minimatch` advisory in a separate
+dependency-maintenance change.
 
 ## Reporting a vulnerability
 

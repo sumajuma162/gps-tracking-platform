@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from gpsgw import main as gateway_main
 from gpsgw.app import Gateway, StartupError
 from gpsgw.config import GatewayConfig
 from gpsgw.protocols.teltonika.encoder import encode_imei
@@ -87,3 +88,43 @@ async def test_catalog_change_event_clears_the_whole_registry_cache():
     await gw._on_device_event({"action": "assigned", "identifier": "356307042441013", "active": True})
     await gw._on_device_event({"action": "noop"})
     assert Spy.calls == [None, "356307042441013"]
+
+
+async def test_process_run_starts_and_stops_gateway(monkeypatch):
+    calls: list[str] = []
+
+    class FakeGateway:
+        async def start(self) -> None:
+            calls.append("start")
+
+        def snapshot(self) -> dict[str, object]:
+            return {"storage": "memory"}
+
+        async def stop(self) -> None:
+            calls.append("stop")
+
+    def signal_handler(self, sig, callback, *args):  # type: ignore[no-untyped-def]
+        callback(*args)
+
+    monkeypatch.setattr(gateway_main, "Gateway", lambda _cfg: FakeGateway())
+    monkeypatch.setattr(asyncio.BaseEventLoop, "add_signal_handler", signal_handler)
+
+    await gateway_main.run(cfg())
+
+    assert calls == ["start", "stop"]
+
+
+def test_main_exits_cleanly_on_startup_error(monkeypatch):
+    from gpsgw import jsonlog
+
+    async def fail_startup(_cfg):  # type: ignore[no-untyped-def]
+        raise StartupError("test startup failure")
+
+    monkeypatch.setattr(jsonlog, "configure", lambda: None)
+    monkeypatch.setattr(gateway_main, "GatewayConfig", type("Config", (), {"from_env": staticmethod(cfg)}))
+    monkeypatch.setattr(gateway_main, "run", fail_startup)
+
+    with pytest.raises(SystemExit) as exit_error:
+        gateway_main.main()
+
+    assert exit_error.value.code == 2

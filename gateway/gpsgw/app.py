@@ -19,6 +19,7 @@ from gpsgw.services.connections import ConnectionTracker
 from gpsgw.services.pipeline import IngestPipeline
 
 log = logging.getLogger("gpsgw")
+POOL_CLOSE_TIMEOUT = 5.0
 
 
 def _manual_device_time(value: Any) -> datetime:
@@ -135,7 +136,7 @@ class Gateway:
         device = await self.registry.lookup(identifier, protocol)
         if device is None:
             raise LookupError(identifier)
-        io: dict[int, int] = {}
+        io: dict[int, int | bytes] = {}
         if device.profile:
             for mapping in device.profile.mappings:
                 if mapping.kind == "field" and mapping.target == "ignition":
@@ -237,4 +238,8 @@ class Gateway:
         if self.redis is not None:
             await self.redis.aclose()
         if self.pool is not None:
-            await self.pool.close()
+            try:
+                await asyncio.wait_for(self.pool.close(), timeout=POOL_CLOSE_TIMEOUT)
+            except TimeoutError:
+                log.warning("PostgreSQL pool did not drain before shutdown; terminating outstanding connections")
+                self.pool.terminate()

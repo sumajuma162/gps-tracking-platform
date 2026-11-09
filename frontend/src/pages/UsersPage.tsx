@@ -135,7 +135,7 @@ function InviteDialog({ roles, onClose, onDone }: { roles: Role[]; onClose: () =
     role_id: z.coerce.number().int().positive(t("common.required")),
   });
   const viewer = roles.find((r) => r.slug === "viewer")?.id;
-  const { register, handleSubmit, setError, formState: { errors, isSubmitting } } = useForm<z.infer<typeof schema>>({
+  const { register, handleSubmit, setError, formState: { errors, isSubmitting } } = useForm<z.input<typeof schema>, undefined, z.output<typeof schema>>({
     resolver: zodResolver(schema), defaultValues: { email: "", full_name: "", role_id: viewer ?? 0 } });
   const onSubmit = handleSubmit(async (values) => {
     setServerError(null);

@@ -35,6 +35,14 @@ describe("api client", () => {
     expect(await refreshSession()).toBeNull();
   });
 
+  it("keeps the session when refresh is temporarily unavailable", async () => {
+    mock.onPost("/auth/refresh/").reply(502, {});
+    mock.onGet("/users/").reply(401, {});
+    await expect(api.get("/users/")).rejects.toBeTruthy();
+    expect(useAuth.getState().status).toBe("authenticated");
+    expect(useAuth.getState().access).toBe("token-1");
+  });
+
   it("never retries the login request itself", async () => {
     let refreshCalls = 0;
     mock.onPost("/auth/refresh/").reply(() => { refreshCalls += 1; return [200, session]; });

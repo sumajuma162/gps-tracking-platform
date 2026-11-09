@@ -32,9 +32,13 @@ export function refreshSession(): Promise<string | null> {
       useAuth.getState().setSession(data);
       return data.access;
     })
-    .catch(() => {
-      useAuth.getState().clear();
-      return null;
+    .catch((error: AxiosError) => {
+      const auth = useAuth.getState();
+      if (error.response?.status === 401 || auth.status !== "authenticated" || !auth.access) {
+        auth.clear();
+        return null;
+      }
+      return auth.access;
     })
     .finally(() => { refreshing = null; });
   return refreshing;

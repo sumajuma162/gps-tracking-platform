@@ -45,6 +45,27 @@ async def test_memory_gateway_serves_trackers_and_health():
         await gw.stop()
 
 
+async def test_gateway_stop_terminates_pool_that_does_not_drain(monkeypatch):
+    class StuckPool:
+        def __init__(self) -> None:
+            self.terminated = False
+
+        async def close(self) -> None:
+            await asyncio.Future()
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    monkeypatch.setattr("gpsgw.app.POOL_CLOSE_TIMEOUT", 0.01)
+    gw = Gateway(config())
+    pool = StuckPool()
+    gw.pool = pool
+
+    await gw.stop()
+
+    assert pool.terminated
+
+
 @pytest.mark.parametrize("kw,message", [({"allow_memory_storage": False}, "GATEWAY_ALLOW_MEMORY_STORAGE"),
                                         ({"storage": "nope"}, "unknown GATEWAY_STORAGE"),
                                         ({"storage": "postgres"}, "DATABASE_URL")])
